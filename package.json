@@ -1,0 +1,15 @@
+{
+  "name": "iaeste-fetch-student-reviews",
+  "version": "1.0.0",
+  "description": "",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc"
+  },
+  "keywords": [],
+  "author": "Michal Grňo",
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.0.4"
+  }
+}
