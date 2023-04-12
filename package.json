@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "",
   "main": "dist/index.js",
+  "type": "module",
   "scripts": {
     "build": "tsc"
   },
@@ -10,6 +11,10 @@
   "author": "Michal Grňo",
   "license": "MIT",
   "devDependencies": {
+    "@types/jsdom": "^21.1.1",
     "typescript": "^5.0.4"
+  },
+  "dependencies": {
+    "jsdom": "^21.1.1"
   }
 }
