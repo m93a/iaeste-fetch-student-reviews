@@ -1,8 +1,14 @@
 import { JSDOM } from "jsdom";
 const domParser = new new JSDOM().window.DOMParser();
 const parseDom = domParser.parseFromString.bind(domParser);
+const mapOpt = <S, T>(v: S | undefined, f: (v: S) => T | undefined): T | undefined =>
+  v === undefined ? undefined : f(v);
 
-const BASE_URL = "https://www.iaeste.cz/student-report?page=student_report_list";
+const ROOT_URL = "https://www.iaeste.cz";
+const BASE_URL = ROOT_URL + "/student-report?page=student_report_list";
+const SUBLIST_URL = ROOT_URL + "/student-report?page=student_report_country";
+const REVIEW_URL = ROOT_URL + "/student-report?page=student_report&id=";
+
 const LANG_URL_FRAGMENT = "&lang=";
 const UI_LANG_URL_FRAGMENT = "&ui_lang=";
 const LANG_CZECH = "cs_cz";
@@ -13,15 +19,18 @@ const COUNTRY_URL_FRAGMENT_REGEX = /&country=(\d+)/;
 const FIELD_URL_FRAGMENT = "&faculty=";
 const FIELD_URL_FRAGMENT_REGEX = /&faculty=(\d+)/;
 const SPECIALIZATION_URL_FRAGMENT = "&specialization=";
+const SPECIALIZATION_URL_FRAGMENT_REGEX = /&specialization=(\d+)/;
+const REVIEW_ID_URL_FRAGMENT = "&id=";
+const REVIEW_ID_URL_FRAGMENT_REGEX = /&id=(\d+)/;
 
-const REVIEW_URL = "https://www.iaeste.cz/student-report?page=student_report&id=";
+const REVIEW_IN_CZECH_ICON = "i-cz.png";
 
 async function urlToDocument(url: string): Promise<Document> {
   const text = await (await fetch(url)).text();
   return parseDom(text, "text/html");
 }
-const isAnchor = (el: Element): el is HTMLAnchorElement => el.matches("a");
-const textOf = (el: Element): string => el.textContent?.trim() ?? '';
+const isAnchor = (el: Element | null): el is HTMLAnchorElement => el?.matches("a") ?? false;
+const textOf = (el: Element | null): string => el?.textContent?.trim() ?? "";
 
 export interface LocalizedString {
   cs: string;
@@ -95,16 +104,104 @@ export async function getBaseCategories(): Promise<Categories> {
 
   // extract fields
   const enAnchors = enCells.flatMap((c) => [...c.querySelectorAll("a")]);
-  const enFields = new Map(enAnchors.map((a) => [Number(a.href.match(FIELD_URL_FRAGMENT_REGEX)?.[1] ?? -1), textOf(a)]));
-  const csFields = new Map(csAnchors.map((a) => [Number(a.href.match(FIELD_URL_FRAGMENT_REGEX)?.[1] ?? -1), textOf(a)]));
+  const enFields = new Map(
+    enAnchors.map((a) => [Number(a.href.match(FIELD_URL_FRAGMENT_REGEX)?.[1] ?? -1), textOf(a)])
+  );
+  const csFields = new Map(
+    csAnchors.map((a) => [Number(a.href.match(FIELD_URL_FRAGMENT_REGEX)?.[1] ?? -1), textOf(a)])
+  );
   enFields.delete(-1);
   csFields.delete(-1);
 
   // collect all fields
-  const fields: Field[] = [...enFields.keys()].map((id) => ({ id, name: { en: enFields.get(id) ?? "", cs: csFields.get(id) ?? "" } }));
+  const fields: Field[] = [...enFields.keys()].map((id) => ({
+    id,
+    name: { en: enFields.get(id) ?? "", cs: csFields.get(id) ?? "" },
+  }));
 
   return {
     countryCategories,
     fields,
   };
+}
+
+export interface ReviewEntry {
+  id: number;
+  year: number;
+  location: string;
+  reviewLanguage: "cs" | "en";
+  student: { name: string; surname: string };
+  university?: LocalizedString;
+  thumbnailUrl?: string;
+}
+export function getReviewEntriesByCountry(countryId: number) {
+  return sublistToReviewEntries(SUBLIST_URL + COUNTRY_URL_FRAGMENT + countryId);
+}
+export function getReviewEntriesByField(fieldId: number) {
+  return sublistToReviewEntries(SUBLIST_URL + FIELD_URL_FRAGMENT + fieldId);
+}
+export function getReviewEntriesBySpecialization(fieldId: number, specializationId: number) {
+  return sublistToReviewEntries(
+    SUBLIST_URL + FIELD_URL_FRAGMENT + fieldId + SPECIALIZATION_URL_FRAGMENT + specializationId
+  );
+}
+async function sublistToReviewEntries(url: string): Promise<ReviewEntry[]> {
+  const enDoc = await urlToDocument(url + LANG_URL_FRAGMENT + LANG_ENGLISH);
+  const csDoc = await urlToDocument(url + LANG_URL_FRAGMENT + LANG_CZECH);
+
+  const [enRows, csRows] = [enDoc, csDoc].map((doc) => [
+    ...(doc.querySelector(".content .tablist table tbody")?.querySelectorAll("tr") ?? []),
+  ]);
+
+  csRows.shift();
+  const headers = [...(enRows.shift()?.querySelectorAll("td, th") ?? [])].map((th) => textOf(th).toLowerCase());
+
+  const findColumn = (str: string) => headers.findIndex((h) => h.includes(str)) + 1;
+  const cols = {
+    year: findColumn("year"),
+    location: findColumn("location"),
+    student: findColumn("student"),
+    university: findColumn("university"),
+    specialization: findColumn("specialization"),
+  };
+
+  const getColumn = (tr: Element, i: number) => tr.querySelector(`td:nth-of-type(${i})`);
+  return enRows.map((row, i): ReviewEntry => {
+    const a = getColumn(row, cols.location)?.querySelector("a");
+    const id = Number(a?.href.match(REVIEW_ID_URL_FRAGMENT_REGEX)?.[1] ?? -1);
+
+    const year = Number(textOf(getColumn(row, cols.year)));
+    const location = textOf(getColumn(row, cols.location));
+    const student = textOf(getColumn(row, cols.student))
+      .split(",")
+      .map((s) => s.trim());
+    const [surname, name] = student;
+
+    const reviewLanguage = row.querySelector(`img[src*="${REVIEW_IN_CZECH_ICON}"]`) === null ? "en" : "cs";
+    const universityEn = textOf(getColumn(row, cols.university));
+    const universityCs =
+      mapOpt(
+        csRows.find((row) => [...row.querySelectorAll("a")].some((a) => a.href.match(REVIEW_ID_URL_FRAGMENT + id))),
+        (row) => textOf(getColumn(row, cols.university))
+      ) ?? "";
+    const university =
+      universityEn === "" && universityCs === ""
+        ? undefined
+        : {
+            en: universityEn,
+            cs: universityCs,
+          };
+
+    const thumbnailUrl = mapOpt(row.querySelector<HTMLImageElement>("img.thumb_img")?.src, (src) => ROOT_URL + src);
+
+    return {
+      id,
+      year,
+      location,
+      student: { name, surname },
+      reviewLanguage,
+      university,
+      thumbnailUrl,
+    };
+  });
 }
