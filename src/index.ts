@@ -125,6 +125,37 @@ export async function getBaseCategories(): Promise<Categories> {
   };
 }
 
+export interface Specialization {
+  id: number;
+  name: LocalizedString;
+}
+export async function getSpecializationsOfField(fieldId: number): Promise<Specialization[]> {
+  const url = SUBLIST_URL + FIELD_URL_FRAGMENT + fieldId;
+  const enDoc = await urlToDocument(url + LANG_URL_FRAGMENT + LANG_ENGLISH);
+  const csDoc = await urlToDocument(url + LANG_URL_FRAGMENT + LANG_CZECH);
+
+  const [enItems, csItems] = [enDoc, csDoc].map(
+    (doc) =>
+      new Map(
+        [...doc.querySelectorAll<HTMLAnchorElement>(`a[href*="&faculty=${fieldId}"]`)]
+          .map((a) => ({
+            name: textOf(a),
+            id: Number(a.href.match(SPECIALIZATION_URL_FRAGMENT_REGEX)?.[1] ?? -1),
+          }))
+          .filter(({ id }) => id !== -1)
+          .map(({ id, name }) => [id, name])
+      )
+  );
+
+  const specs: Specialization[] = [];
+  for (const [id, en] of enItems) {
+    const cs = csItems.get(id) ?? "";
+    specs.push({ id, name: { en, cs } });
+  }
+
+  return specs;
+}
+
 export interface ReviewEntry {
   id: number;
   year: number;
