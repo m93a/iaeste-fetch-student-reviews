@@ -7,10 +7,9 @@ const BASE_URL = ROOT_URL + "/student-report?page=student_report_list";
 const SUBLIST_URL = ROOT_URL + "/student-report?page=student_report_country";
 const REVIEW_URL = ROOT_URL + "/student-report?page=student_report&id=";
 const LANG_URL_FRAGMENT = "&lang=";
-const UI_LANG_URL_FRAGMENT = "&ui_lang=";
 const LANG_CZECH = "cs_cz";
 const LANG_ENGLISH = "en_us";
-const COUNTRY_URL_FRAGMENT = "&country=";
+const COUNTRY_URL_FRAGMENT = "&couquntry=";
 const COUNTRY_URL_FRAGMENT_REGEX = /&country=(\d+)/;
 const FIELD_URL_FRAGMENT = "&faculty=";
 const FIELD_URL_FRAGMENT_REGEX = /&faculty=(\d+)/;
@@ -160,3 +159,79 @@ async function sublistToReviewEntries(url) {
         };
     });
 }
+export async function getReviewContent(id) {
+    const doc = await urlToDocument(REVIEW_URL + id);
+    const report = doc.querySelector(".student_report");
+    const yearOfStudy = textOf(report.querySelector("h4")).match(/year\s+(.*)$/)?.[1] ?? "";
+    const photoLinks = [...(report.querySelector(".gallery")?.querySelectorAll("a") ?? [])];
+    const photos = photoLinks.map((a) => ({
+        fullSizeUrl: ROOT_URL + a.href,
+        thumbnailUrl: mapOpt(a.querySelector("img")?.src, (s) => ROOT_URL + s) ?? "",
+    }));
+    const infoTable = report.querySelector("table.header");
+    const infoRows = [...(infoTable?.querySelectorAll("tr") ?? [])];
+    const infoCells = infoRows.map((row) => [...row.querySelectorAll("td")].map(textOf));
+    
+    // it seems all the actual text is in elements with the body class
+    const reportBodies = report.querySelector("#report_body").querySelectorAll(".body");
+    const bodiesTexts = [...reportBodies].map((body) => textOf(body));
+    //NOTE - are they always in the same order?
+
+    return {
+        id,
+        yearOfStudy,
+        photos,
+        info: {},
+        place: {
+            'location': bodiesTexts[0],
+            'city': bodiesTexts[1],
+            'surroundings': bodiesTexts[2],
+        },
+        work: {
+            'employer': bodiesTexts[3],
+            'jobDescription': bodiesTexts[4],
+            'salary': bodiesTexts[5],
+            'languageRequirements': bodiesTexts[6],
+            'accommodation': bodiesTexts[7],
+        },
+        socialLife: {
+            'meetingIAESTEMembers': bodiesTexts[8],
+            'meetingOtherForeignStudents': bodiesTexts[9],
+            'sportAndCulture': bodiesTexts[10],
+            'food': bodiesTexts[11],
+        },
+        miscellaneous: {
+            'communicationWithCzechRep': bodiesTexts[12],
+            'reccomendation': bodiesTexts[13],
+            'whatNotToForget': bodiesTexts[14],
+            'benefitsOfInternships': bodiesTexts[15],
+            'cooperationWithIAESTE': bodiesTexts[16],
+            'overallExperienceWithIAESTE': bodiesTexts[17],
+        },
+        websites: {
+            'employerWebsite': bodiesTexts[18]
+        },
+    };
+}
+
+// from now down it's just my quokka debugging file c: 
+
+//lets see if all reviews have entries
+//oh shit pls dont ddos put in some sleep
+const maxID = 1000
+for (let i = 1; i < maxID; i++) {
+    try {
+        getReviewContent(i).then(data => { });
+    } catch (e) {
+        if (e instanceof TypeError) {
+            // Oh no, some id doesn't have all the array entries
+            console.log("error at id " + i)
+        }
+        else {
+            // this should also check for error of not finding the review in case there is one id missing but the next one is fine
+            console.log("Uh oh")
+            console.log(e)
+        };
+    };
+};
+console.log("Yaay C:")
