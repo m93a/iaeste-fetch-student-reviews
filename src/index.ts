@@ -293,7 +293,10 @@ export async function getReviewContent(id: number): Promise<ReviewContent> {
   const doc = await urlToDocument(REVIEW_URL + id);
   const report = doc.querySelector(".student_report")!;
 
-  const yearOfStudy = textOf(report.querySelector("h4")).match(/year\s+(.*)$/)?.[1] ?? "";
+  // This here gets the year of study from the report title
+  const nameAndYearArr = textOf(report.querySelector("h4")).split('.') ?? "";
+  const wordSalat = nameAndYearArr[nameAndYearArr.length - 2].split(' ');
+  const yearOfStudy = wordSalat[wordSalat.length - 1];
 
   const photoLinks = [...(report.querySelector(".gallery")?.querySelectorAll("a") ?? [])];
   const photos = photoLinks.map(
@@ -314,7 +317,7 @@ export async function getReviewContent(id: number): Promise<ReviewContent> {
   
   return {
     id,
-    yearOfStudy, //TODO
+    yearOfStudy,
     photos,
     info: {
       'faculty': info[0],
@@ -362,3 +365,6 @@ export async function getReviewContent(id: number): Promise<ReviewContent> {
     },
   };
 }
+
+const idNum = 4;
+getReviewContent(idNum).then((review) => { console.log(review) });
