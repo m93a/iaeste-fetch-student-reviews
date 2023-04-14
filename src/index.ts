@@ -10,7 +10,6 @@ const SUBLIST_URL = ROOT_URL + "/student-report?page=student_report_country";
 const REVIEW_URL = ROOT_URL + "/student-report?page=student_report&id=";
 
 const LANG_URL_FRAGMENT = "&lang=";
-const UI_LANG_URL_FRAGMENT = "&ui_lang=";
 const LANG_CZECH = "cs_cz";
 const LANG_ENGLISH = "en_us";
 
@@ -29,8 +28,9 @@ async function urlToDocument(url: string): Promise<Document> {
   const text = await (await fetch(url)).text();
   return parseDom(text, "text/html");
 }
-const isAnchor = (el: Element | null): el is HTMLAnchorElement => el?.matches("a") ?? false;
-const textOf = (el: Element | null): string => el?.textContent?.trim() ?? "";
+type nullish = null | undefined;
+const isAnchor = (el: Element | nullish): el is HTMLAnchorElement => el?.matches("a") ?? false;
+const textOf = (el: Element | nullish): string => el?.textContent?.trim() ?? "";
 
 export interface LocalizedString {
   cs: string;
@@ -235,4 +235,87 @@ async function sublistToReviewEntries(url: string): Promise<ReviewEntry[]> {
       thumbnailUrl,
     };
   });
+}
+
+export interface Photo {
+  thumbnailUrl: string;
+  fullSizeUrl: string;
+}
+export interface ReviewContent {
+  id: number;
+  yearOfStudy: string;
+  photos: Photo[];
+  info: {
+    faculty: string;
+    fieldOfStudy: string;
+    period: string;
+    durationInWeeks: number;
+    transport: string;
+    insurance: string;
+    visa: string;
+    visaPrice: string;
+    internshipReferenceNumber: string;
+  };
+  websites: {
+    student: string;
+    employer: string;
+    other: string[];
+  };
+  place: {
+    locationDescription: string;
+    aboutCity: string;
+    aboutSurroundings: string;
+  };
+  work: {
+    employerDescription: string;
+    workDescription: string;
+    salaryDescription: string;
+    languageRequirements: string;
+    accomodation: string;
+  };
+  socialLife: {
+    iaesteMembers: string;
+    foreignStudents: string;
+    sportAndCulture: string;
+    food: string;
+  };
+  miscellaneous: {
+    communicationWithHome: string;
+    recommendations: string;
+    dontForget: string;
+    benefits: string;
+    localIaesteCooperation: string;
+    overallExperienceWithIaeste: string;
+    otherComments: string;
+  };
+}
+export async function getReviewContent(id: number): Promise<ReviewContent> {
+  const doc = await urlToDocument(REVIEW_URL + id);
+  const report = doc.querySelector(".student_report")!;
+
+  const yearOfStudy = textOf(report.querySelector("h4")).match(/year\s+(.*)$/)?.[1] ?? "";
+
+  const photoLinks = [...(report.querySelector(".gallery")?.querySelectorAll("a") ?? [])];
+  const photos = photoLinks.map(
+    (a): Photo => ({
+      fullSizeUrl: ROOT_URL + a.href,
+      thumbnailUrl: mapOpt(a.querySelector("img")?.src, (s) => ROOT_URL + s) ?? "",
+    })
+  );
+
+  const infoTable = report.querySelector("table.header");
+  const infoRows = [...(infoTable?.querySelectorAll("tr") ?? [])];
+  const infoCells = infoRows.map((row) => [...row.querySelectorAll("td")].map(textOf) as [string, string]);
+
+  return {
+    id,
+    yearOfStudy,
+    photos,
+    info: {} as any, // TODO
+    websites: {} as any, // TODO
+    place: {} as any, // TODO
+    work: {} as any, // TODO
+    socialLife: {} as any, // TODO
+    miscellaneous: {} as any, // TODO
+  };
 }
