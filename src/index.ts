@@ -294,7 +294,7 @@ export async function getReviewContent(id: number): Promise<ReviewContent> {
   const report = doc.querySelector(".student_report")!;
 
   // This here gets the year of study from the report title
-  const nameAndYearArr = textOf(report.querySelector("h4")).split('.') ?? "";
+  const nameAndYearArr = textOf(report.querySelector("h4")).split('.') ?? ""; // NOTE - is this the best way to do this?
   const wordSalat = nameAndYearArr[nameAndYearArr.length - 2].split(' ');
   const yearOfStudy = wordSalat[wordSalat.length - 1];
 
