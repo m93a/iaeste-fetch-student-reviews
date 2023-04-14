@@ -306,16 +306,27 @@ export async function getReviewContent(id: number): Promise<ReviewContent> {
   const infoTable = report.querySelector("table.header");
   const infoRows = [...(infoTable?.querySelectorAll("tr") ?? [])];
   const infoCells = infoRows.map((row) => [...row.querySelectorAll("td")].map(textOf) as [string, string]);
+  const info = infoCells.map((innerArray) => innerArray[1])
+
   // it seems all the actual text is in elements with the body class
   const reportBodies = report.querySelector("#report_body")?.querySelectorAll(".body");
   const bodiesTexts = [...reportBodies ?? []].map((body) => textOf(body));
-  //NOTE - are they always in the same order?
   
   return {
     id,
-    yearOfStudy,
+    yearOfStudy, //TODO
     photos,
-    info: {},
+    info: {
+      'faculty': info[0],
+      'fieldOfStudy': info[1],
+      'period': info[4],
+      'durationInWeeks': parseInt(info[5]), //NOTE - je tohle good practice? :c
+      'transport': info[6],
+      'insurance': info[7],
+      'visa': info[8],
+      'visaPrice': info[9],
+      'internshipReferenceNumber': info[12],
+    },
     place: {
       'locationDescription': bodiesTexts[0],
       'aboutCity': bodiesTexts[1],
@@ -351,25 +362,3 @@ export async function getReviewContent(id: number): Promise<ReviewContent> {
     },
   };
 }
-
-// from now down it's just my quokka debugging file c: 
-
-//lets see if all reviews have entries
-//oh shit pls dont ddos put in some sleep
-const maxID = 1000
-for (let i = 1; i < maxID; i++) {
-  try {
-    getReviewContent(i).then(data => { });
-  } catch (e) {
-    if (e instanceof TypeError) {
-      // Oh no, some id doesn't have all the array entries
-      console.log("error at id " + i)
-    }
-    else {
-      // this should also check for error of not finding the review in case there is one id missing but the next one is fine
-      console.log("Uh oh")
-      console.log(e)
-    };
-  };
-};
-console.log("Yaay C:")
