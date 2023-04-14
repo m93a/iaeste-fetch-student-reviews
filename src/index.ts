@@ -306,16 +306,70 @@ export async function getReviewContent(id: number): Promise<ReviewContent> {
   const infoTable = report.querySelector("table.header");
   const infoRows = [...(infoTable?.querySelectorAll("tr") ?? [])];
   const infoCells = infoRows.map((row) => [...row.querySelectorAll("td")].map(textOf) as [string, string]);
-
+  // it seems all the actual text is in elements with the body class
+  const reportBodies = report.querySelector("#report_body")?.querySelectorAll(".body");
+  const bodiesTexts = [...reportBodies ?? []].map((body) => textOf(body));
+  //NOTE - are they always in the same order?
+  
   return {
     id,
     yearOfStudy,
     photos,
-    info: {} as any, // TODO
-    websites: {} as any, // TODO
-    place: {} as any, // TODO
-    work: {} as any, // TODO
-    socialLife: {} as any, // TODO
-    miscellaneous: {} as any, // TODO
+    info: {},
+    place: {
+      'locationDescription': bodiesTexts[0],
+      'aboutCity': bodiesTexts[1],
+      'aboutSurroundings': bodiesTexts[2],
+    },
+    work: {
+      'employerDescription': bodiesTexts[3],
+      'workDescription': bodiesTexts[4],
+      'salaryDescription': bodiesTexts[5],
+      'languageRequirements': bodiesTexts[6],
+      'accomodation': bodiesTexts[7],
+    },
+    socialLife: {
+      'iaesteMembers': bodiesTexts[8],
+      'foreignStudents': bodiesTexts[9],
+      'sportAndCulture': bodiesTexts[10],
+      'food': bodiesTexts[11],
+    },
+    miscellaneous: {
+      'communicationWithHome': bodiesTexts[12],
+      'recommendations': bodiesTexts[13],
+      'dontForget': bodiesTexts[14],
+      'benefits': bodiesTexts[15],
+      'localIaesteCooperation': bodiesTexts[16],
+      'overallExperienceWithIaeste': bodiesTexts[17],
+      'otherComments': bodiesTexts[21],
+    },
+    websites: {
+      'student': bodiesTexts[18],
+      'employer': bodiesTexts[19],
+      'other': bodiesTexts[20].split(','),
+
+    },
   };
 }
+
+// from now down it's just my quokka debugging file c: 
+
+//lets see if all reviews have entries
+//oh shit pls dont ddos put in some sleep
+const maxID = 1000
+for (let i = 1; i < maxID; i++) {
+  try {
+    getReviewContent(i).then(data => { });
+  } catch (e) {
+    if (e instanceof TypeError) {
+      // Oh no, some id doesn't have all the array entries
+      console.log("error at id " + i)
+    }
+    else {
+      // this should also check for error of not finding the review in case there is one id missing but the next one is fine
+      console.log("Uh oh")
+      console.log(e)
+    };
+  };
+};
+console.log("Yaay C:")

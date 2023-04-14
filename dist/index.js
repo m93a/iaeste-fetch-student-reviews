@@ -217,7 +217,7 @@ export async function getReviewContent(id) {
 // from now down it's just my quokka debugging file c: 
 
 //lets see if all reviews have entries
-//oh shit pls dont ddos put in some sleep
+//oh shit pls dont ddos put in some
 const maxID = 1000
 for (let i = 1; i < maxID; i++) {
     try {
