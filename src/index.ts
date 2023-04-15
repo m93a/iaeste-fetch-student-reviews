@@ -127,6 +127,7 @@ export async function getBaseCategories(): Promise<Categories> {
 
 export interface Specialization {
   id: number;
+  fieldId: number;
   name: LocalizedString;
 }
 export async function getSpecializationsOfField(fieldId: number): Promise<Specialization[]> {
@@ -150,7 +151,7 @@ export async function getSpecializationsOfField(fieldId: number): Promise<Specia
   const specs: Specialization[] = [];
   for (const [id, en] of enItems) {
     const cs = csItems.get(id) ?? "";
-    specs.push({ id, name: { en, cs } });
+    specs.push({ id, fieldId, name: { en, cs } });
   }
 
   return specs;
@@ -294,8 +295,8 @@ export async function getReviewContent(id: number): Promise<ReviewContent> {
   const report = doc.querySelector(".student_report")!;
 
   // This here gets the year of study from the report title
-  const nameAndYearArr = textOf(report.querySelector("h4")).split('.') ?? ""; // NOTE - is this the best way to do this?
-  const wordSalat = nameAndYearArr[nameAndYearArr.length - 2].split(' ');
+  const nameAndYearArr = textOf(report.querySelector("h4")).split(".") ?? ""; // NOTE - is this the best way to do this?
+  const wordSalat = nameAndYearArr[nameAndYearArr.length - 2].split(" ");
   const yearOfStudy = wordSalat[wordSalat.length - 1];
 
   const photoLinks = [...(report.querySelector(".gallery")?.querySelectorAll("a") ?? [])];
@@ -309,62 +310,88 @@ export async function getReviewContent(id: number): Promise<ReviewContent> {
   const infoTable = report.querySelector("table.header");
   const infoRows = [...(infoTable?.querySelectorAll("tr") ?? [])];
   const infoCells = infoRows.map((row) => [...row.querySelectorAll("td")].map(textOf) as [string, string]);
-  const info = infoCells.map((innerArray) => innerArray[1])
+  const info = infoCells.map((innerArray) => innerArray[1]);
 
   // it seems all the actual text is in elements with the body class
   const reportBodies = report.querySelector("#report_body")?.querySelectorAll(".body");
-  const bodiesTexts = [...reportBodies ?? []].map((body) => textOf(body));
-  
+  const bodiesTexts = [...(reportBodies ?? [])].map((body) => textOf(body));
+
   return {
     id,
     yearOfStudy,
     photos,
     info: {
-      'faculty': info[0],
-      'fieldOfStudy': info[1],
-      'period': info[4],
-      'durationInWeeks': parseInt(info[5]), //NOTE - je tohle good practice? :c
-      'transport': info[6],
-      'insurance': info[7],
-      'visa': info[8],
-      'visaPrice': info[9],
-      'internshipReferenceNumber': info[12],
+      faculty: info[0],
+      fieldOfStudy: info[1],
+      period: info[4],
+      durationInWeeks: parseInt(info[5]),
+      transport: info[6],
+      insurance: info[7],
+      visa: info[8],
+      visaPrice: info[9],
+      internshipReferenceNumber: info[12],
     },
     place: {
-      'locationDescription': bodiesTexts[0],
-      'aboutCity': bodiesTexts[1],
-      'aboutSurroundings': bodiesTexts[2],
+      locationDescription: bodiesTexts[0],
+      aboutCity: bodiesTexts[1],
+      aboutSurroundings: bodiesTexts[2],
     },
     work: {
-      'employerDescription': bodiesTexts[3],
-      'workDescription': bodiesTexts[4],
-      'salaryDescription': bodiesTexts[5],
-      'languageRequirements': bodiesTexts[6],
-      'accomodation': bodiesTexts[7],
+      employerDescription: bodiesTexts[3],
+      workDescription: bodiesTexts[4],
+      salaryDescription: bodiesTexts[5],
+      languageRequirements: bodiesTexts[6],
+      accomodation: bodiesTexts[7],
     },
     socialLife: {
-      'iaesteMembers': bodiesTexts[8],
-      'foreignStudents': bodiesTexts[9],
-      'sportAndCulture': bodiesTexts[10],
-      'food': bodiesTexts[11],
+      iaesteMembers: bodiesTexts[8],
+      foreignStudents: bodiesTexts[9],
+      sportAndCulture: bodiesTexts[10],
+      food: bodiesTexts[11],
     },
     miscellaneous: {
-      'communicationWithHome': bodiesTexts[12],
-      'recommendations': bodiesTexts[13],
-      'dontForget': bodiesTexts[14],
-      'benefits': bodiesTexts[15],
-      'localIaesteCooperation': bodiesTexts[16],
-      'overallExperienceWithIaeste': bodiesTexts[17],
-      'otherComments': bodiesTexts[21],
+      communicationWithHome: bodiesTexts[12],
+      recommendations: bodiesTexts[13],
+      dontForget: bodiesTexts[14],
+      benefits: bodiesTexts[15],
+      localIaesteCooperation: bodiesTexts[16],
+      overallExperienceWithIaeste: bodiesTexts[17],
+      otherComments: bodiesTexts[21],
     },
     websites: {
-      'student': bodiesTexts[18],
-      'employer': bodiesTexts[19],
-      'other': bodiesTexts[20].split(','),
-
+      student: bodiesTexts[18],
+      employer: bodiesTexts[19],
+      other: bodiesTexts[20].split(","),
     },
   };
 }
 
-const idNum = 4;
-getReviewContent(idNum).then((review) => { console.log(review) });
+export interface Review extends Omit<ReviewEntry, "location">, ReviewContent {
+  /*
+   * The `location` field on ReviewEntry might have either
+   * the format "{City}" (returned by getReviewEntriesByCountry),
+   * or the format "{Country}, {City}" (returned by
+   * getReviewEntriesByField and getReviewEntriesBySpecialization).
+   * Here, we want to be sure it's the city.
+   */
+  city: string;
+
+  countryId: number;
+  fieldId: number;
+  specializationId?: number;
+}
+export interface AllReviewData {
+  countryCategories: CountryCategory[];
+  fields: Field[];
+  specializations: Specialization[];
+  reviews: Review[];
+}
+export async function getDataDump(): Promise<AllReviewData> {
+  // TODO
+  return {
+    countryCategories: [],
+    fields: [],
+    specializations: [],
+    reviews: [],
+  };
+}
