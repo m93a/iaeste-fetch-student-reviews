@@ -295,9 +295,8 @@ export async function getReviewContent(id: number): Promise<ReviewContent> {
   const report = doc.querySelector(".student_report")!;
 
   // This here gets the year of study from the report title
-  const nameAndYearArr = textOf(report.querySelector("h4")).split(".") ?? ""; // NOTE - is this the best way to do this?
-  const wordSalat = nameAndYearArr[nameAndYearArr.length - 2].split(" ");
-  const yearOfStudy = wordSalat[wordSalat.length - 1];
+  const nameAndYearArr = textOf(report.querySelector("h4")).split(' ') ?? "";
+  const yearOfStudy = nameAndYearArr[nameAndYearArr.length - 1].split('.')[0];
 
   const photoLinks = [...(report.querySelector(".gallery")?.querySelectorAll("a") ?? [])];
   const photos = photoLinks.map(
@@ -359,9 +358,10 @@ export async function getReviewContent(id: number): Promise<ReviewContent> {
       otherComments: bodiesTexts[21],
     },
     websites: {
-      student: bodiesTexts[18],
-      employer: bodiesTexts[19],
-      other: bodiesTexts[20].split(","),
+      'student': bodiesTexts[18],
+      'employer': bodiesTexts[19],
+      'other': bodiesTexts[20].split('\n'),
+
     },
   };
 }
