@@ -396,8 +396,6 @@ export async function getDataDump(): Promise<AllReviewData> {
 
   // First we get review id paired with field and specialization id to make a look up table
   for (const field of fields) {
-
-
     const fieldId = field.id;
     const fieldReviews = await getReviewEntriesByField(fieldId);
     for (const review of fieldReviews) {
