@@ -387,11 +387,64 @@ export interface AllReviewData {
   reviews: Review[];
 }
 export async function getDataDump(): Promise<AllReviewData> {
-  // TODO
+
+  const baseCategories = await getBaseCategories();
+  const fields = baseCategories.fields;
+
+  let reviewIdToFieldId: { [reviewId: number]: number } = {};
+  let reviewIdToSpecializationId: { [reviewId: number]: number } = {};
+
+  // First we get review id paired with field and specialization id to make a look up table
+  for (const field of fields) {
+
+
+    const fieldId = field.id;
+    const fieldReviews = await getReviewEntriesByField(fieldId);
+    for (const review of fieldReviews) {
+      reviewIdToFieldId[review.id] = fieldId;
+    }
+
+    const fieldSpecializations = await getSpecializationsOfField(fieldId);
+    for (const specialization of fieldSpecializations) {
+      const specializationId = specialization.id;
+      console.log("aaa data dump..."); // FIXME This is way too slow, so should I just omit all the awaits and put thens there instead? This is supposed to return promise anyway...
+      const specializationReviews = await getReviewEntriesBySpecialization(fieldId, specializationId);
+      for (const review of specializationReviews) {
+        // This might not get every review becuase some of them dont have specialization so I cant assign both field and spec. here
+        reviewIdToFieldId[review.id] = fieldId;
+      }
+    }
+  };
+
+  // Now we actually get the data becuase we need to get them by country to get the city name  
+  const countryCategories = baseCategories.countryCategories;
+  const countries = countryCategories.map((category) => category.countries).flat();
+  let reviews: Review[] = [];
+  for (const country of countries) {
+    const countryId = country.id;
+    const countryReviews = await getReviewEntriesByCountry(countryId);
+    for (const reviewEntry of countryReviews) {
+      const reviewId = reviewEntry.id;
+      const reviewFieldId = reviewIdToFieldId[reviewId];
+      const reviewSpecializationId = reviewIdToSpecializationId[reviewId] ?? undefined;
+      const reviewContent = await getReviewContent(reviewId);
+      const currentReview: Review = {
+        countryId: countryId,
+        city: reviewEntry.location,
+        fieldId: reviewFieldId,
+        specializationId: reviewSpecializationId,
+
+        ...reviewEntry,
+        ...reviewContent,
+      }
+      reviews.push(currentReview);
+
+    }
+  }
   return {
-    countryCategories: [],
-    fields: [],
+    countryCategories: countryCategories,
+    fields: fields,
     specializations: [],
-    reviews: [],
+    reviews: reviews,
   };
 }
