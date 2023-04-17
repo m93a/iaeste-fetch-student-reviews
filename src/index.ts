@@ -27,9 +27,16 @@ const REVIEW_IN_CZECH_ICON = "i-cz.png";
 const TIMER_LABEL = "Done in";
 const TOTAL_TIMER_LABEL = "Everything completed in";
 
-async function urlToDocument(url: string): Promise<Document> {
+type Cache = Map<string, Document>;
+async function urlToDocument(url: string, cache?: Cache): Promise<Document> {
+  const cachedDoc = cache?.get(url);
+  if (cachedDoc) return cachedDoc;
+
   const text = await (await fetch(url)).text();
-  return parseDom(text, "text/html");
+  const doc = parseDom(text, "text/html");
+  if (cache) cache.set(url, doc);
+
+  return doc;
 }
 type nullish = null | undefined;
 const isAnchor = (el: Element | nullish): el is HTMLAnchorElement => el?.matches("a") ?? false;
@@ -57,14 +64,14 @@ export interface Categories {
   countryCategories: CountryCategory[];
   fields: Field[];
 }
-async function getBaseTableCells(lang: string) {
-  const doc = await urlToDocument(BASE_URL + LANG_URL_FRAGMENT + lang);
+async function getBaseTableCells(lang: string, cache?: Cache) {
+  const doc = await urlToDocument(BASE_URL + LANG_URL_FRAGMENT + lang, cache);
   const table = doc.querySelector(".content .tablediv table");
   return [...(table?.querySelectorAll("td") ?? [])];
 }
-export async function getBaseCategories(): Promise<Categories> {
-  const enCells = await getBaseTableCells(LANG_ENGLISH);
-  const csCells = await getBaseTableCells(LANG_CZECH);
+export async function getBaseCategories(cache?: Cache): Promise<Categories> {
+  const enCells = await getBaseTableCells(LANG_ENGLISH, cache);
+  const csCells = await getBaseTableCells(LANG_CZECH, cache);
 
   // extract countries in english
   type Cat = { en: string; cs?: string; countries: Array<{ id: number; en: string; cs?: string }> };
@@ -135,10 +142,10 @@ export interface Specialization {
   fieldId: number;
   name: LocalizedString;
 }
-export async function getSpecializationsOfField(fieldId: number): Promise<Specialization[]> {
+export async function getSpecializationsOfField(fieldId: number, cache?: Cache): Promise<Specialization[]> {
   const url = SUBLIST_URL + FIELD_URL_FRAGMENT + fieldId;
-  const enDoc = await urlToDocument(url + LANG_URL_FRAGMENT + LANG_ENGLISH);
-  const csDoc = await urlToDocument(url + LANG_URL_FRAGMENT + LANG_CZECH);
+  const enDoc = await urlToDocument(url + LANG_URL_FRAGMENT + LANG_ENGLISH, cache);
+  const csDoc = await urlToDocument(url + LANG_URL_FRAGMENT + LANG_CZECH, cache);
 
   const [enItems, csItems] = [enDoc, csDoc].map(
     (doc) =>
@@ -171,20 +178,21 @@ export interface ReviewEntry {
   university?: LocalizedString;
   thumbnailUrl?: string;
 }
-export function getReviewEntriesByCountry(countryId: number) {
-  return sublistToReviewEntries(SUBLIST_URL + COUNTRY_URL_FRAGMENT + countryId);
+export function getReviewEntriesByCountry(countryId: number, cache?: Cache) {
+  return sublistToReviewEntries(SUBLIST_URL + COUNTRY_URL_FRAGMENT + countryId, cache);
 }
-export function getReviewEntriesByField(fieldId: number) {
-  return sublistToReviewEntries(SUBLIST_URL + FIELD_URL_FRAGMENT + fieldId);
+export function getReviewEntriesByField(fieldId: number, cache?: Cache) {
+  return sublistToReviewEntries(SUBLIST_URL + FIELD_URL_FRAGMENT + fieldId, cache);
 }
-export function getReviewEntriesBySpecialization(fieldId: number, specializationId: number) {
+export function getReviewEntriesBySpecialization(fieldId: number, specializationId: number, cache?: Cache) {
   return sublistToReviewEntries(
-    SUBLIST_URL + FIELD_URL_FRAGMENT + fieldId + SPECIALIZATION_URL_FRAGMENT + specializationId
+    SUBLIST_URL + FIELD_URL_FRAGMENT + fieldId + SPECIALIZATION_URL_FRAGMENT + specializationId,
+    cache
   );
 }
-async function sublistToReviewEntries(url: string): Promise<ReviewEntry[]> {
-  const enDoc = await urlToDocument(url + LANG_URL_FRAGMENT + LANG_ENGLISH);
-  const csDoc = await urlToDocument(url + LANG_URL_FRAGMENT + LANG_CZECH);
+async function sublistToReviewEntries(url: string, cache?: Cache): Promise<ReviewEntry[]> {
+  const enDoc = await urlToDocument(url + LANG_URL_FRAGMENT + LANG_ENGLISH, cache);
+  const csDoc = await urlToDocument(url + LANG_URL_FRAGMENT + LANG_CZECH, cache);
 
   const [enRows, csRows] = [enDoc, csDoc].map((doc) => [
     ...(doc.querySelector(".content .tablist table tbody")?.querySelectorAll("tr") ?? []),
@@ -297,8 +305,8 @@ export interface ReviewContent {
     otherComments: string;
   };
 }
-export async function getReviewContent(id: number): Promise<ReviewContent> {
-  const doc = await urlToDocument(REVIEW_URL + id);
+export async function getReviewContent(id: number, cache?: Cache): Promise<ReviewContent> {
+  const doc = await urlToDocument(REVIEW_URL + id, cache);
   const report = doc.querySelector(".student_report")!;
 
   // This here gets the year of study from the report title
@@ -406,8 +414,9 @@ export async function getDataDump(): Promise<AllReviewData> {
   for (const field of fields) {
     console.log("Fetching field:", field.name.en);
     console.time(TIMER_LABEL);
-    const fieldReviews = await getReviewEntriesByField(field.id);
-    const fieldSpecializations = await getSpecializationsOfField(field.id);
+    const cache: Cache = new Map(); // avoid requesting the url twice
+    const fieldReviews = await getReviewEntriesByField(field.id, cache);
+    const fieldSpecializations = await getSpecializationsOfField(field.id, cache);
     specializations.push(...fieldSpecializations);
 
     for (const review of fieldReviews) {

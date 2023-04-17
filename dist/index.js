@@ -20,21 +20,27 @@ const REVIEW_ID_URL_FRAGMENT_REGEX = /&id=(\d+)/;
 const REVIEW_IN_CZECH_ICON = "i-cz.png";
 const TIMER_LABEL = "Done in";
 const TOTAL_TIMER_LABEL = "Everything completed in";
-async function urlToDocument(url) {
+async function urlToDocument(url, cache) {
+    const cachedDoc = cache?.get(url);
+    if (cachedDoc)
+        return cachedDoc;
     const text = await (await fetch(url)).text();
-    return parseDom(text, "text/html");
+    const doc = parseDom(text, "text/html");
+    if (cache)
+        cache.set(url, doc);
+    return doc;
 }
 const isAnchor = (el) => el?.matches("a") ?? false;
 const textOf = (el) => el?.textContent?.trim() ?? "";
 const omit = (obj, ...keys) => Object.fromEntries(Object.entries(obj).filter(([k]) => !keys.includes(k)));
-async function getBaseTableCells(lang) {
-    const doc = await urlToDocument(BASE_URL + LANG_URL_FRAGMENT + lang);
+async function getBaseTableCells(lang, cache) {
+    const doc = await urlToDocument(BASE_URL + LANG_URL_FRAGMENT + lang, cache);
     const table = doc.querySelector(".content .tablediv table");
     return [...(table?.querySelectorAll("td") ?? [])];
 }
-export async function getBaseCategories() {
-    const enCells = await getBaseTableCells(LANG_ENGLISH);
-    const csCells = await getBaseTableCells(LANG_CZECH);
+export async function getBaseCategories(cache) {
+    const enCells = await getBaseTableCells(LANG_ENGLISH, cache);
+    const csCells = await getBaseTableCells(LANG_CZECH, cache);
     const cats = [];
     for (const cell of enCells) {
         let cat;
@@ -88,10 +94,10 @@ export async function getBaseCategories() {
         fields,
     };
 }
-export async function getSpecializationsOfField(fieldId) {
+export async function getSpecializationsOfField(fieldId, cache) {
     const url = SUBLIST_URL + FIELD_URL_FRAGMENT + fieldId;
-    const enDoc = await urlToDocument(url + LANG_URL_FRAGMENT + LANG_ENGLISH);
-    const csDoc = await urlToDocument(url + LANG_URL_FRAGMENT + LANG_CZECH);
+    const enDoc = await urlToDocument(url + LANG_URL_FRAGMENT + LANG_ENGLISH, cache);
+    const csDoc = await urlToDocument(url + LANG_URL_FRAGMENT + LANG_CZECH, cache);
     const [enItems, csItems] = [enDoc, csDoc].map((doc) => new Map([...doc.querySelectorAll(`a[href*="&faculty=${fieldId}"]`)]
         .map((a) => ({
         name: textOf(a),
@@ -106,18 +112,18 @@ export async function getSpecializationsOfField(fieldId) {
     }
     return specs;
 }
-export function getReviewEntriesByCountry(countryId) {
-    return sublistToReviewEntries(SUBLIST_URL + COUNTRY_URL_FRAGMENT + countryId);
+export function getReviewEntriesByCountry(countryId, cache) {
+    return sublistToReviewEntries(SUBLIST_URL + COUNTRY_URL_FRAGMENT + countryId, cache);
 }
-export function getReviewEntriesByField(fieldId) {
-    return sublistToReviewEntries(SUBLIST_URL + FIELD_URL_FRAGMENT + fieldId);
+export function getReviewEntriesByField(fieldId, cache) {
+    return sublistToReviewEntries(SUBLIST_URL + FIELD_URL_FRAGMENT + fieldId, cache);
 }
-export function getReviewEntriesBySpecialization(fieldId, specializationId) {
-    return sublistToReviewEntries(SUBLIST_URL + FIELD_URL_FRAGMENT + fieldId + SPECIALIZATION_URL_FRAGMENT + specializationId);
+export function getReviewEntriesBySpecialization(fieldId, specializationId, cache) {
+    return sublistToReviewEntries(SUBLIST_URL + FIELD_URL_FRAGMENT + fieldId + SPECIALIZATION_URL_FRAGMENT + specializationId, cache);
 }
-async function sublistToReviewEntries(url) {
-    const enDoc = await urlToDocument(url + LANG_URL_FRAGMENT + LANG_ENGLISH);
-    const csDoc = await urlToDocument(url + LANG_URL_FRAGMENT + LANG_CZECH);
+async function sublistToReviewEntries(url, cache) {
+    const enDoc = await urlToDocument(url + LANG_URL_FRAGMENT + LANG_ENGLISH, cache);
+    const csDoc = await urlToDocument(url + LANG_URL_FRAGMENT + LANG_CZECH, cache);
     const [enRows, csRows] = [enDoc, csDoc].map((doc) => [
         ...(doc.querySelector(".content .tablist table tbody")?.querySelectorAll("tr") ?? []),
     ]);
@@ -162,8 +168,8 @@ async function sublistToReviewEntries(url) {
         };
     });
 }
-export async function getReviewContent(id) {
-    const doc = await urlToDocument(REVIEW_URL + id);
+export async function getReviewContent(id, cache) {
+    const doc = await urlToDocument(REVIEW_URL + id, cache);
     const report = doc.querySelector(".student_report");
     // This here gets the year of study from the report title
     const yearOfStudy = textOf(report.querySelector("h4")).match(/year (.*)$/i)?.[1] ?? "";
@@ -241,8 +247,9 @@ export async function getDataDump() {
     for (const field of fields) {
         console.log("Fetching field:", field.name.en);
         console.time(TIMER_LABEL);
-        const fieldReviews = await getReviewEntriesByField(field.id);
-        const fieldSpecializations = await getSpecializationsOfField(field.id);
+        const cache = new Map(); // avoid requesting the url twice
+        const fieldReviews = await getReviewEntriesByField(field.id, cache);
+        const fieldSpecializations = await getSpecializationsOfField(field.id, cache);
         specializations.push(...fieldSpecializations);
         for (const review of fieldReviews) {
             reviewIdToFieldId.set(review.id, field.id);
