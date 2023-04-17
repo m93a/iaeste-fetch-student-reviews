@@ -20,7 +20,6 @@ const SPECIALIZATION_URL_FRAGMENT_REGEX = /&specialization=(\d+)/;
 const REVIEW_ID_URL_FRAGMENT = "&id=";
 const REVIEW_ID_URL_FRAGMENT_REGEX = /&id=(\d+)/;
 const REVIEW_IN_CZECH_ICON = "i-cz.png";
-const TOTAL_TIMER_LABEL = "Everything completed in";
 async function urlToDocument(url, cache, retries = 5) {
     const cachedDoc = cache?.get(url);
     if (cachedDoc)
@@ -193,7 +192,7 @@ export async function getReviewContent(id, cache) {
     const infoTable = report.querySelector("table.header");
     const infoRows = [...(infoTable?.querySelectorAll("tr") ?? [])];
     const infoCells = infoRows.map((row) => [...row.querySelectorAll("td")].map(textOf));
-    const info = infoCells.map((innerArray) => innerArray[1]);
+    const info = infoCells.map((innerArray) => innerArray[1].trim());
     // it seems all the actual text is in elements with the body class
     const reportBodies = report.querySelector("#report_body")?.querySelectorAll(".body");
     const bodiesTexts = [...(reportBodies ?? [])].map((body) => textOf(body));
@@ -202,7 +201,7 @@ export async function getReviewContent(id, cache) {
         yearOfStudy,
         photos,
         fieldName: info[2],
-        specializationName: info[3].trim(),
+        specializationName: info[3],
         info: {
             faculty: info[0],
             fieldOfStudy: info[1],
@@ -249,8 +248,6 @@ export async function getReviewContent(id, cache) {
     };
 }
 export async function getDataDump() {
-    console.log("Fetching base categories");
-    console.time(TOTAL_TIMER_LABEL);
     const baseCategories = await getBaseCategories();
     const fields = baseCategories.fields;
     const specializations = [];
@@ -259,7 +256,6 @@ export async function getDataDump() {
     await PromisePool.withConcurrency(MAX_CONCURRENT_REQUESTS)
         .for(fields)
         .process(async (field) => {
-        console.time(field.name.en);
         const cache = new Map(); // avoid requesting the url twice
         const fieldReviews = await getReviewEntriesByField(field.id, cache);
         const fieldSpecializations = await getSpecializationsOfField(field.id, cache);
@@ -267,7 +263,6 @@ export async function getDataDump() {
         for (const review of fieldReviews) {
             reviewIdToFieldId.set(review.id, field.id);
         }
-        console.timeEnd(field.name.en);
     });
     let specializationNameToId = new Map();
     for (const { id, name } of specializations) {
@@ -281,7 +276,6 @@ export async function getDataDump() {
     await PromisePool.withConcurrency(MAX_CONCURRENT_COUNTRIES)
         .for(countries)
         .process(async (country) => {
-        console.time(country.name.en);
         const countryId = country.id;
         const reviewEntries = await getReviewEntriesByCountry(countryId);
         const reviewData = await PromisePool.withConcurrency(MAX_CONCURRENT_REQUESTS / MAX_CONCURRENT_COUNTRIES)
@@ -290,7 +284,7 @@ export async function getDataDump() {
         for (const { entry, content } of reviewData.results) {
             const reviewId = entry.id;
             const fieldId = reviewIdToFieldId.get(reviewId);
-            const specializationId = specializationNameToId.get(content.specializationName);
+            const specializationId = specializationNameToId.get(content.specializationName); // FIXME doesn't care about field
             reviews.push({
                 countryId,
                 fieldId,
@@ -300,9 +294,7 @@ export async function getDataDump() {
                 ...omit(content, "fieldName", "specializationName"),
             });
         }
-        console.timeEnd(country.name.en);
     });
-    console.timeEnd(TOTAL_TIMER_LABEL);
     return {
         countryCategories,
         fields,
