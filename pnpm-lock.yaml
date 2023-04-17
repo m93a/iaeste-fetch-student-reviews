@@ -1,6 +1,9 @@
 lockfileVersion: '6.0'
 
 dependencies:
+  '@supercharge/promise-pool':
+    specifier: ^2.4.0
+    version: 2.4.0
   jsdom:
     specifier: ^21.1.1
     version: 21.1.1
@@ -14,6 +17,11 @@ devDependencies:
     version: 5.0.4
 
 packages:
+
+  /@supercharge/promise-pool@2.4.0:
+    resolution: {integrity: sha512-O9CMipBlq5OObdt1uKJGIzm9cdjpPWfj+a+Zw9EgWKxaMNHKC7EU7X9taj3H0EGQNLOSq2jAcOa3EzxlfHsD6w==}
+    engines: {node: '>=8'}
+    dev: false
 
   /@tootallnate/once@2.0.0:
     resolution: {integrity: sha512-XCuKFP5PS55gnMVu3dty8KPatLqUoy/ZYzDzAGCQ8JNFCkLXzmI7vNHCR+XpbZaMWQK/vQubr7PkYq8g470J/A==}

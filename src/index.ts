@@ -1,8 +1,10 @@
+import { PromisePool } from "@supercharge/promise-pool";
 import { JSDOM } from "jsdom";
 const domParser = new new JSDOM().window.DOMParser();
 const parseDom = domParser.parseFromString.bind(domParser);
-const mapOpt = <S, T>(v: S | undefined, f: (v: S) => T | undefined): T | undefined =>
-  v === undefined ? undefined : f(v);
+
+const MAX_CONCURRENT_REQUESTS = 32;
+const MAX_CONCURRENT_COUNTRIES = 4;
 
 const ROOT_URL = "https://www.iaeste.cz";
 const BASE_URL = ROOT_URL + "/student-report?page=student_report_list";
@@ -24,25 +26,38 @@ const REVIEW_ID_URL_FRAGMENT_REGEX = /&id=(\d+)/;
 
 const REVIEW_IN_CZECH_ICON = "i-cz.png";
 
-const TIMER_LABEL = "Done in";
 const TOTAL_TIMER_LABEL = "Everything completed in";
 
-type Cache = Map<string, Document>;
-async function urlToDocument(url: string, cache?: Cache): Promise<Document> {
+async function urlToDocument(url: string, cache?: Cache, retries = 5): Promise<Document> {
   const cachedDoc = cache?.get(url);
   if (cachedDoc) return cachedDoc;
 
-  const text = await (await fetch(url)).text();
+  const response = await fetch(url);
+
+  if (!response.ok) {
+    if (retries <= 0) throw Error(`Failed to fetch URL: ${url}`);
+    // wait for 1s, 2s, 3.5s, 10s, 50s before trying again
+    // maximum wait time before failing is ~1 min
+    await delay(50_000 / retries ** 1.5);
+    return urlToDocument(url, cache, retries - 1);
+  }
+
+  const text = await response.text();
   const doc = parseDom(text, "text/html");
   if (cache) cache.set(url, doc);
 
   return doc;
 }
+
+type Cache = Map<string, Document>;
 type nullish = null | undefined;
 const isAnchor = (el: Element | nullish): el is HTMLAnchorElement => el?.matches("a") ?? false;
 const textOf = (el: Element | nullish): string => el?.textContent?.trim() ?? "";
 const omit = <T extends Record<any, any>, K extends string & keyof T>(obj: T, ...keys: K[]): Omit<T, K> =>
   Object.fromEntries(Object.entries(obj).filter(([k]) => !(keys as string[]).includes(k))) as any;
+const delay = (ms: number) => new Promise<void>((res) => setTimeout(res, ms));
+const mapOpt = <S, T>(v: S | undefined, f: (v: S) => T | undefined): T | undefined =>
+  v === undefined ? undefined : f(v);
 
 export interface LocalizedString {
   cs: string;
@@ -411,19 +426,20 @@ export async function getDataDump(): Promise<AllReviewData> {
   // Fetch fields and specializations, make lookup tables for them
   let reviewIdToFieldId = new Map<number, number>();
 
-  for (const field of fields) {
-    console.log("Fetching field:", field.name.en);
-    console.time(TIMER_LABEL);
-    const cache: Cache = new Map(); // avoid requesting the url twice
-    const fieldReviews = await getReviewEntriesByField(field.id, cache);
-    const fieldSpecializations = await getSpecializationsOfField(field.id, cache);
-    specializations.push(...fieldSpecializations);
+  await PromisePool.withConcurrency(MAX_CONCURRENT_REQUESTS)
+    .for(fields)
+    .process(async (field) => {
+      console.time(field.name.en);
+      const cache: Cache = new Map(); // avoid requesting the url twice
+      const fieldReviews = await getReviewEntriesByField(field.id, cache);
+      const fieldSpecializations = await getSpecializationsOfField(field.id, cache);
+      specializations.push(...fieldSpecializations);
 
-    for (const review of fieldReviews) {
-      reviewIdToFieldId.set(review.id, field.id);
-    }
-    console.timeEnd(TIMER_LABEL);
-  }
+      for (const review of fieldReviews) {
+        reviewIdToFieldId.set(review.id, field.id);
+      }
+      console.timeEnd(field.name.en);
+    });
 
   let specializationNameToId = new Map<string, number>();
   for (const { id, name } of specializations) {
@@ -436,31 +452,34 @@ export async function getDataDump(): Promise<AllReviewData> {
   const countries = countryCategories.flatMap((category) => category.countries);
   const reviews: Review[] = [];
 
-  for (const country of countries) {
-    console.log("Fetching country:", country.name.en);
-    console.time(TIMER_LABEL);
-    const countryId = country.id;
-    const reviewEntries = await getReviewEntriesByCountry(countryId);
-    const reviewData = await Promise.all(
-      reviewEntries.map((entry) => getReviewContent(entry.id).then((content) => ({ entry, content })))
-    );
-    for (const { entry, content } of reviewData) {
-      const reviewId = entry.id;
-      const fieldId = reviewIdToFieldId.get(reviewId)!;
-      const specializationId = specializationNameToId.get(content.specializationName);
+  await PromisePool.withConcurrency(MAX_CONCURRENT_COUNTRIES)
+    .for(countries)
+    .process(async (country) => {
+      console.time(country.name.en);
+      const countryId = country.id;
+      const reviewEntries = await getReviewEntriesByCountry(countryId);
 
-      reviews.push({
-        countryId,
-        fieldId,
-        specializationId,
-        city: entry.location,
+      const reviewData = await PromisePool.withConcurrency(MAX_CONCURRENT_REQUESTS / MAX_CONCURRENT_COUNTRIES)
+        .for(reviewEntries)
+        .process((entry) => getReviewContent(entry.id).then((content) => ({ entry, content })));
 
-        ...omit(entry, "location"),
-        ...omit(content, "fieldName", "specializationName"),
-      });
-    }
-    console.timeEnd(TIMER_LABEL);
-  }
+      for (const { entry, content } of reviewData.results) {
+        const reviewId = entry.id;
+        const fieldId = reviewIdToFieldId.get(reviewId)!;
+        const specializationId = specializationNameToId.get(content.specializationName);
+
+        reviews.push({
+          countryId,
+          fieldId,
+          specializationId,
+          city: entry.location,
+
+          ...omit(entry, "location"),
+          ...omit(content, "fieldName", "specializationName"),
+        });
+      }
+      console.timeEnd(country.name.en);
+    });
 
   console.timeEnd(TOTAL_TIMER_LABEL);
   return {

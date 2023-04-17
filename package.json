@@ -15,6 +15,7 @@
     "typescript": "^5.0.4"
   },
   "dependencies": {
+    "@supercharge/promise-pool": "^2.4.0",
     "jsdom": "^21.1.1"
   }
 }
