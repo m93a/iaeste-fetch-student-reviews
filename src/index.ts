@@ -31,6 +31,8 @@ async function urlToDocument(url: string): Promise<Document> {
 type nullish = null | undefined;
 const isAnchor = (el: Element | nullish): el is HTMLAnchorElement => el?.matches("a") ?? false;
 const textOf = (el: Element | nullish): string => el?.textContent?.trim() ?? "";
+const omit = <T extends Record<any, any>, K extends string & keyof T>(obj: T, ...keys: K[]): Omit<T, K> =>
+  Object.fromEntries(Object.entries(obj).filter(([k]) => !(keys as string[]).includes(k))) as any;
 
 export interface LocalizedString {
   cs: string;
@@ -295,8 +297,7 @@ export async function getReviewContent(id: number): Promise<ReviewContent> {
   const report = doc.querySelector(".student_report")!;
 
   // This here gets the year of study from the report title
-  const nameAndYearArr = textOf(report.querySelector("h4")).split(' ') ?? "";
-  const yearOfStudy = nameAndYearArr[nameAndYearArr.length - 1].split('.')[0];
+  const yearOfStudy = textOf(report.querySelector("h4")).match(/year (.*)$/i)?.[1] ?? "";
 
   const photoLinks = [...(report.querySelector(".gallery")?.querySelectorAll("a") ?? [])];
   const photos = photoLinks.map(
@@ -358,10 +359,9 @@ export async function getReviewContent(id: number): Promise<ReviewContent> {
       otherComments: bodiesTexts[21],
     },
     websites: {
-      'student': bodiesTexts[18],
-      'employer': bodiesTexts[19],
-      'other': bodiesTexts[20].split('\n'),
-
+      student: bodiesTexts[18],
+      employer: bodiesTexts[19],
+      other: bodiesTexts[20].split("\n"),
     },
   };
 }
@@ -387,62 +387,66 @@ export interface AllReviewData {
   reviews: Review[];
 }
 export async function getDataDump(): Promise<AllReviewData> {
-
+  console.log('Fetching base categories');
   const baseCategories = await getBaseCategories();
   const fields = baseCategories.fields;
+  const specializations: Specialization[] = [];
 
+  // First we get review id paired with field and specialization id to make a look up table.
+  // We need to iterate through both fields and specializations, because not every review has a specialization.
   let reviewIdToFieldId: { [reviewId: number]: number } = {};
   let reviewIdToSpecializationId: { [reviewId: number]: number } = {};
 
-  // First we get review id paired with field and specialization id to make a look up table
   for (const field of fields) {
-    const fieldId = field.id;
-    const fieldReviews = await getReviewEntriesByField(fieldId);
+    console.log('Fetching field:', field.name.en);
+    const fieldReviews = await getReviewEntriesByField(field.id);
+    const fieldSpecializations = await getSpecializationsOfField(field.id);
+
     for (const review of fieldReviews) {
-      reviewIdToFieldId[review.id] = fieldId;
+      reviewIdToFieldId[review.id] = field.id;
     }
 
-    const fieldSpecializations = await getSpecializationsOfField(fieldId);
     for (const specialization of fieldSpecializations) {
-      const specializationId = specialization.id;
-      console.log("aaa data dump..."); // FIXME This is way too slow, so should I just omit all the awaits and put thens there instead? This is supposed to return promise anyway...
-      const specializationReviews = await getReviewEntriesBySpecialization(fieldId, specializationId);
+      specializations.push(specialization);
+
+      const specializationReviews = await getReviewEntriesBySpecialization(field.id, specialization.id);
       for (const review of specializationReviews) {
-        // This might not get every review becuase some of them dont have specialization so I cant assign both field and spec. here
-        reviewIdToFieldId[review.id] = fieldId;
+        reviewIdToSpecializationId[review.id] = specialization.id;
       }
     }
-  };
+  }
 
-  // Now we actually get the data becuase we need to get them by country to get the city name  
+  // Now we actually get the data becuase we need to get them by country to get the city name
   const countryCategories = baseCategories.countryCategories;
-  const countries = countryCategories.map((category) => category.countries).flat();
-  let reviews: Review[] = [];
+  const countries = countryCategories.flatMap((category) => category.countries);
+  const reviews: Review[] = [];
+
   for (const country of countries) {
+    console.log('Fetching country:', country.name.en);
     const countryId = country.id;
     const countryReviews = await getReviewEntriesByCountry(countryId);
     for (const reviewEntry of countryReviews) {
       const reviewId = reviewEntry.id;
-      const reviewFieldId = reviewIdToFieldId[reviewId];
-      const reviewSpecializationId = reviewIdToSpecializationId[reviewId] ?? undefined;
+      const fieldId = reviewIdToFieldId[reviewId];
+      const specializationId = reviewIdToSpecializationId[reviewId] ?? undefined;
       const reviewContent = await getReviewContent(reviewId);
-      const currentReview: Review = {
-        countryId: countryId,
+
+      reviews.push({
+        countryId,
+        fieldId,
+        specializationId,
         city: reviewEntry.location,
-        fieldId: reviewFieldId,
-        specializationId: reviewSpecializationId,
 
-        ...reviewEntry,
+        ...omit(reviewEntry, "location"),
         ...reviewContent,
-      }
-      reviews.push(currentReview);
-
+      });
     }
   }
+
   return {
-    countryCategories: countryCategories,
-    fields: fields,
-    specializations: [],
-    reviews: reviews,
+    countryCategories,
+    fields,
+    specializations,
+    reviews,
   };
 }

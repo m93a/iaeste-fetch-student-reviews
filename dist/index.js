@@ -24,6 +24,7 @@ async function urlToDocument(url) {
 }
 const isAnchor = (el) => el?.matches("a") ?? false;
 const textOf = (el) => el?.textContent?.trim() ?? "";
+const omit = (obj, ...keys) => Object.fromEntries(Object.entries(obj).filter(([k]) => !keys.includes(k)));
 async function getBaseTableCells(lang) {
     const doc = await urlToDocument(BASE_URL + LANG_URL_FRAGMENT + lang);
     const table = doc.querySelector(".content .tablediv table");
@@ -99,7 +100,7 @@ export async function getSpecializationsOfField(fieldId) {
     const specs = [];
     for (const [id, en] of enItems) {
         const cs = csItems.get(id) ?? "";
-        specs.push({ id, name: { en, cs } });
+        specs.push({ id, fieldId, name: { en, cs } });
     }
     return specs;
 }
@@ -163,8 +164,7 @@ export async function getReviewContent(id) {
     const doc = await urlToDocument(REVIEW_URL + id);
     const report = doc.querySelector(".student_report");
     // This here gets the year of study from the report title
-    const nameAndYearArr = textOf(report.querySelector("h4")).split(' ') ?? "";
-    const yearOfStudy = nameAndYearArr[nameAndYearArr.length - 1].split('.')[0];
+    const yearOfStudy = textOf(report.querySelector("h4")).match(/year (.*)$/i)?.[1] ?? "";
     const photoLinks = [...(report.querySelector(".gallery")?.querySelectorAll("a") ?? [])];
     const photos = photoLinks.map((a) => ({
         fullSizeUrl: ROOT_URL + a.href,
@@ -176,54 +176,107 @@ export async function getReviewContent(id) {
     const info = infoCells.map((innerArray) => innerArray[1]);
     // it seems all the actual text is in elements with the body class
     const reportBodies = report.querySelector("#report_body")?.querySelectorAll(".body");
-    const bodiesTexts = [...reportBodies ?? []].map((body) => textOf(body));
+    const bodiesTexts = [...(reportBodies ?? [])].map((body) => textOf(body));
     return {
         id,
         yearOfStudy,
         photos,
         info: {
-            'faculty': info[0],
-            'fieldOfStudy': info[1],
-            'period': info[4],
-            'durationInWeeks': parseInt(info[5]),
-            'transport': info[6],
-            'insurance': info[7],
-            'visa': info[8],
-            'visaPrice': info[9],
-            'internshipReferenceNumber': info[12],
+            faculty: info[0],
+            fieldOfStudy: info[1],
+            period: info[4],
+            durationInWeeks: parseInt(info[5]),
+            transport: info[6],
+            insurance: info[7],
+            visa: info[8],
+            visaPrice: info[9],
+            internshipReferenceNumber: info[12],
         },
         place: {
-            'locationDescription': bodiesTexts[0],
-            'aboutCity': bodiesTexts[1],
-            'aboutSurroundings': bodiesTexts[2],
+            locationDescription: bodiesTexts[0],
+            aboutCity: bodiesTexts[1],
+            aboutSurroundings: bodiesTexts[2],
         },
         work: {
-            'employerDescription': bodiesTexts[3],
-            'workDescription': bodiesTexts[4],
-            'salaryDescription': bodiesTexts[5],
-            'languageRequirements': bodiesTexts[6],
-            'accomodation': bodiesTexts[7],
+            employerDescription: bodiesTexts[3],
+            workDescription: bodiesTexts[4],
+            salaryDescription: bodiesTexts[5],
+            languageRequirements: bodiesTexts[6],
+            accomodation: bodiesTexts[7],
         },
         socialLife: {
-            'iaesteMembers': bodiesTexts[8],
-            'foreignStudents': bodiesTexts[9],
-            'sportAndCulture': bodiesTexts[10],
-            'food': bodiesTexts[11],
+            iaesteMembers: bodiesTexts[8],
+            foreignStudents: bodiesTexts[9],
+            sportAndCulture: bodiesTexts[10],
+            food: bodiesTexts[11],
         },
         miscellaneous: {
-            'communicationWithHome': bodiesTexts[12],
-            'recommendations': bodiesTexts[13],
-            'dontForget': bodiesTexts[14],
-            'benefits': bodiesTexts[15],
-            'localIaesteCooperation': bodiesTexts[16],
-            'overallExperienceWithIaeste': bodiesTexts[17],
-            'otherComments': bodiesTexts[21],
+            communicationWithHome: bodiesTexts[12],
+            recommendations: bodiesTexts[13],
+            dontForget: bodiesTexts[14],
+            benefits: bodiesTexts[15],
+            localIaesteCooperation: bodiesTexts[16],
+            overallExperienceWithIaeste: bodiesTexts[17],
+            otherComments: bodiesTexts[21],
         },
         websites: {
-            'student': bodiesTexts[18],
-            'employer': bodiesTexts[19],
-            'other': bodiesTexts[20].split('\n'),
+            student: bodiesTexts[18],
+            employer: bodiesTexts[19],
+            other: bodiesTexts[20].split("\n"),
         },
     };
 }
-getReviewContent(4).then((review) => { });
+export async function getDataDump() {
+    console.log('Fetching base categories');
+    const baseCategories = await getBaseCategories();
+    const fields = baseCategories.fields;
+    const specializations = [];
+    // First we get review id paired with field and specialization id to make a look up table.
+    // We need to iterate through both fields and specializations, because not every review has a specialization.
+    let reviewIdToFieldId = {};
+    let reviewIdToSpecializationId = {};
+    for (const field of fields) {
+        console.log('Fetching field:', field.name.en);
+        const fieldReviews = await getReviewEntriesByField(field.id);
+        const fieldSpecializations = await getSpecializationsOfField(field.id);
+        for (const review of fieldReviews) {
+            reviewIdToFieldId[review.id] = field.id;
+        }
+        for (const specialization of fieldSpecializations) {
+            specializations.push(specialization);
+            const specializationReviews = await getReviewEntriesBySpecialization(field.id, specialization.id);
+            for (const review of specializationReviews) {
+                reviewIdToSpecializationId[review.id] = specialization.id;
+            }
+        }
+    }
+    // Now we actually get the data becuase we need to get them by country to get the city name
+    const countryCategories = baseCategories.countryCategories;
+    const countries = countryCategories.flatMap((category) => category.countries);
+    const reviews = [];
+    for (const country of countries) {
+        console.log('Fetching country:', country.name.en);
+        const countryId = country.id;
+        const countryReviews = await getReviewEntriesByCountry(countryId);
+        for (const reviewEntry of countryReviews) {
+            const reviewId = reviewEntry.id;
+            const fieldId = reviewIdToFieldId[reviewId];
+            const specializationId = reviewIdToSpecializationId[reviewId] ?? undefined;
+            const reviewContent = await getReviewContent(reviewId);
+            reviews.push({
+                countryId,
+                fieldId,
+                specializationId,
+                city: reviewEntry.location,
+                ...omit(reviewEntry, "location"),
+                ...reviewContent,
+            });
+        }
+    }
+    return {
+        countryCategories,
+        fields,
+        specializations,
+        reviews,
+    };
+}
