@@ -24,6 +24,9 @@ const REVIEW_ID_URL_FRAGMENT_REGEX = /&id=(\d+)/;
 
 const REVIEW_IN_CZECH_ICON = "i-cz.png";
 
+const TIMER_LABEL = "Done in";
+const TOTAL_TIMER_LABEL = "Everything completed in";
+
 async function urlToDocument(url: string): Promise<Document> {
   const text = await (await fetch(url)).text();
   return parseDom(text, "text/html");
@@ -387,7 +390,8 @@ export interface AllReviewData {
   reviews: Review[];
 }
 export async function getDataDump(): Promise<AllReviewData> {
-  console.log('Fetching base categories');
+  console.log("Fetching base categories");
+  console.time(TOTAL_TIMER_LABEL);
   const baseCategories = await getBaseCategories();
   const fields = baseCategories.fields;
   const specializations: Specialization[] = [];
@@ -398,22 +402,28 @@ export async function getDataDump(): Promise<AllReviewData> {
   let reviewIdToSpecializationId: { [reviewId: number]: number } = {};
 
   for (const field of fields) {
-    console.log('Fetching field:', field.name.en);
+    console.log("Fetching field:", field.name.en);
+    console.time(TIMER_LABEL);
     const fieldReviews = await getReviewEntriesByField(field.id);
     const fieldSpecializations = await getSpecializationsOfField(field.id);
+    specializations.push(...fieldSpecializations);
 
     for (const review of fieldReviews) {
       reviewIdToFieldId[review.id] = field.id;
     }
 
-    for (const specialization of fieldSpecializations) {
-      specializations.push(specialization);
+    const specializationEntries = (
+      await Promise.all(
+        fieldSpecializations.map((spec) =>
+          getReviewEntriesBySpecialization(field.id, spec.id).then((reviews) => ({ specId: spec.id, reviews }))
+        )
+      )
+    ).flatMap(({ specId, reviews }) => reviews.map((review) => ({ specId, review })));
 
-      const specializationReviews = await getReviewEntriesBySpecialization(field.id, specialization.id);
-      for (const review of specializationReviews) {
-        reviewIdToSpecializationId[review.id] = specialization.id;
-      }
+    for (const { specId, review } of specializationEntries) {
+      reviewIdToSpecializationId[review.id] = specId;
     }
+    console.timeEnd(TIMER_LABEL);
   }
 
   // Now we actually get the data becuase we need to get them by country to get the city name
@@ -422,27 +432,32 @@ export async function getDataDump(): Promise<AllReviewData> {
   const reviews: Review[] = [];
 
   for (const country of countries) {
-    console.log('Fetching country:', country.name.en);
+    console.log("Fetching country:", country.name.en);
+    console.time(TIMER_LABEL);
     const countryId = country.id;
-    const countryReviews = await getReviewEntriesByCountry(countryId);
-    for (const reviewEntry of countryReviews) {
-      const reviewId = reviewEntry.id;
+    const reviewEntries = await getReviewEntriesByCountry(countryId);
+    const reviewData = await Promise.all(
+      reviewEntries.map((entry) => getReviewContent(entry.id).then((content) => ({ entry, content })))
+    );
+    for (const { entry, content } of reviewData) {
+      const reviewId = entry.id;
       const fieldId = reviewIdToFieldId[reviewId];
-      const specializationId = reviewIdToSpecializationId[reviewId] ?? undefined;
-      const reviewContent = await getReviewContent(reviewId);
+      const specializationId = reviewIdToSpecializationId[reviewId];
 
       reviews.push({
         countryId,
         fieldId,
         specializationId,
-        city: reviewEntry.location,
+        city: entry.location,
 
-        ...omit(reviewEntry, "location"),
-        ...reviewContent,
+        ...omit(entry, "location"),
+        ...content,
       });
     }
+    console.timeEnd(TIMER_LABEL);
   }
 
+  console.timeEnd(TOTAL_TIMER_LABEL);
   return {
     countryCategories,
     fields,
