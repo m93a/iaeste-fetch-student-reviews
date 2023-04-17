@@ -183,6 +183,8 @@ export async function getReviewContent(id) {
         id,
         yearOfStudy,
         photos,
+        fieldName: info[2],
+        specializationName: info[3].trim(),
         info: {
             faculty: info[0],
             fieldOfStudy: info[1],
@@ -234,10 +236,8 @@ export async function getDataDump() {
     const baseCategories = await getBaseCategories();
     const fields = baseCategories.fields;
     const specializations = [];
-    // First we get review id paired with field and specialization id to make a look up table.
-    // We need to iterate through both fields and specializations, because not every review has a specialization.
-    let reviewIdToFieldId = {};
-    let reviewIdToSpecializationId = {};
+    // Fetch fields and specializations, make lookup tables for them
+    let reviewIdToFieldId = new Map();
     for (const field of fields) {
         console.log("Fetching field:", field.name.en);
         console.time(TIMER_LABEL);
@@ -245,13 +245,14 @@ export async function getDataDump() {
         const fieldSpecializations = await getSpecializationsOfField(field.id);
         specializations.push(...fieldSpecializations);
         for (const review of fieldReviews) {
-            reviewIdToFieldId[review.id] = field.id;
-        }
-        const specializationEntries = (await Promise.all(fieldSpecializations.map((spec) => getReviewEntriesBySpecialization(field.id, spec.id).then((reviews) => ({ specId: spec.id, reviews }))))).flatMap(({ specId, reviews }) => reviews.map((review) => ({ specId, review })));
-        for (const { specId, review } of specializationEntries) {
-            reviewIdToSpecializationId[review.id] = specId;
+            reviewIdToFieldId.set(review.id, field.id);
         }
         console.timeEnd(TIMER_LABEL);
+    }
+    let specializationNameToId = new Map();
+    for (const { id, name } of specializations) {
+        specializationNameToId.set(name.en, id);
+        specializationNameToId.set(name.cs, id);
     }
     // Now we actually get the data becuase we need to get them by country to get the city name
     const countryCategories = baseCategories.countryCategories;
@@ -265,15 +266,15 @@ export async function getDataDump() {
         const reviewData = await Promise.all(reviewEntries.map((entry) => getReviewContent(entry.id).then((content) => ({ entry, content }))));
         for (const { entry, content } of reviewData) {
             const reviewId = entry.id;
-            const fieldId = reviewIdToFieldId[reviewId];
-            const specializationId = reviewIdToSpecializationId[reviewId];
+            const fieldId = reviewIdToFieldId.get(reviewId);
+            const specializationId = specializationNameToId.get(content.specializationName);
             reviews.push({
                 countryId,
                 fieldId,
                 specializationId,
                 city: entry.location,
                 ...omit(entry, "location"),
-                ...content,
+                ...omit(content, "fieldName", "specializationName"),
             });
         }
         console.timeEnd(TIMER_LABEL);
