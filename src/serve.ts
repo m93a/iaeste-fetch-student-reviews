@@ -1,5 +1,5 @@
 import { getDataDump, AllReviewData } from "./scraper.ts";
-const PORT = 6969;
+const port = Number(Deno.env.get('PORT') ?? 6969);
 
 // initialize fetching current data
 let data: AllReviewData | undefined;
@@ -17,8 +17,8 @@ const hour = 60 * min;
 setInterval(fetchData, 12 * hour);
 
 // start the server
-console.log(`Listening on port ${PORT}`);
-const server = Deno.listen({ port: PORT });
+console.log(`Listening on port ${port}`);
+const server = Deno.listen({ port });
 for await (const conn of server) serve(conn);
 
 async function serve(conn: Deno.Conn) {
