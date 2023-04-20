@@ -1,6 +1,7 @@
-import { PromisePool } from "@supercharge/promise-pool";
-import { JSDOM } from "jsdom";
-const domParser = new new JSDOM().window.DOMParser();
+import { PromisePool } from "npm:@supercharge/promise-pool@2.4.0";
+import { DOMParser, Node, Document, Element } from "https://deno.land/x/deno_dom@v0.1.38/deno-dom-wasm.ts";
+
+const domParser = new DOMParser();
 const parseDom = domParser.parseFromString.bind(domParser);
 
 const MAX_CONCURRENT_REQUESTS = 32;
@@ -30,32 +31,46 @@ async function urlToDocument(url: string, cache?: Cache, retries = 5): Promise<D
   const cachedDoc = cache?.get(url);
   if (cachedDoc) return cachedDoc;
 
-  const response = await fetch(url);
-
-  if (!response.ok) {
+  const retry = async () => {
     if (retries <= 0) throw Error(`Failed to fetch URL: ${url}`);
     // wait for 1s, 2s, 3.5s, 10s, 50s before trying again
     // maximum wait time before failing is ~1 min
     await delay(50_000 / retries ** 1.5);
     return urlToDocument(url, cache, retries - 1);
-  }
+  };
+
+  const response = await fetch(url);
+  if (!response.ok) return await retry();
 
   const text = await response.text();
   const doc = parseDom(text, "text/html");
-  if (cache) cache.set(url, doc);
+  if (!doc) return await retry();
 
+  if (cache) cache.set(url, doc);
   return doc;
 }
 
 type Cache = Map<string, Document>;
 type nullish = null | undefined;
-const isAnchor = (el: Element | nullish): el is HTMLAnchorElement => el?.matches("a") ?? false;
+const isElement = (el: unknown): el is Element => el instanceof Element;
+const isDocument = (doc: unknown): doc is Document => doc instanceof Document;
+const isQueryable = (x: unknown): x is Element | Document => isElement(x) || isDocument(x);
 const textOf = (el: Element | nullish): string => el?.textContent?.trim() ?? "";
+const hrefOf = (el: Element | nullish): string => el?.getAttribute("href") ?? "";
+const srcOf = (el: Element | nullish): string => el?.getAttribute("src") ?? "";
 const omit = <T extends Record<any, any>, K extends string & keyof T>(obj: T, ...keys: K[]): Omit<T, K> =>
   Object.fromEntries(Object.entries(obj).filter(([k]) => !(keys as string[]).includes(k))) as any;
 const delay = (ms: number) => new Promise<void>((res) => setTimeout(res, ms));
-const mapOpt = <S, T>(v: S | undefined, f: (v: S) => T | undefined): T | undefined =>
-  v === undefined ? undefined : f(v);
+const mapOpt = <S, T>(v: S | nullish, f: (v: S) => T | undefined): T | undefined =>
+  v === undefined || v === null ? undefined : f(v);
+const parse = <S, T extends S>(x: S, validate: (x: S) => x is T): T | undefined => (validate(x) ? x : undefined);
+const querySelector = (el: Node | nullish, selector: string): Element | undefined =>
+  parse(
+    mapOpt(parse(el, isQueryable), (el) => el.querySelector(selector)),
+    isElement
+  );
+const querySelectorAll = (el: Node | nullish, selector: string): Element[] =>
+  (mapOpt(parse(el, isQueryable), (el) => [...el.querySelectorAll(selector)]) ?? []).filter(isElement);
 
 export interface LocalizedString {
   cs: string;
@@ -77,10 +92,10 @@ export interface Categories {
   countryCategories: CountryCategory[];
   fields: Field[];
 }
-async function getBaseTableCells(lang: string, cache?: Cache) {
+async function getBaseTableCells(lang: string, cache?: Cache): Promise<Element[]> {
   const doc = await urlToDocument(BASE_URL + LANG_URL_FRAGMENT + lang, cache);
-  const table = doc.querySelector(".content .tablediv table");
-  return [...(table?.querySelectorAll("td") ?? [])];
+  const table = querySelector(doc, ".content .tablediv table");
+  return querySelectorAll(table, "td");
 }
 export async function getBaseCategories(cache?: Cache): Promise<Categories> {
   const enCells = await getBaseTableCells(LANG_ENGLISH, cache);
@@ -97,21 +112,21 @@ export async function getBaseCategories(cache?: Cache): Promise<Categories> {
         cats.push(cat);
       }
 
-      if (!cat || !isAnchor(el)) continue;
+      if (!cat || !isElement(el) || !el.matches("a")) continue;
 
-      const id = Number(el.href.match(COUNTRY_URL_FRAGMENT_REGEX)?.[1] ?? -1);
+      const id = Number(hrefOf(el).match(COUNTRY_URL_FRAGMENT_REGEX)?.[1] ?? -1);
       if (id !== -1) cat.countries.push({ en: textOf(el), id });
     }
   }
 
   // extract countries in czech
-  const csHeadings = csCells.flatMap((c) => [...c.querySelectorAll("h2")]);
+  const csHeadings = csCells.flatMap((c) => querySelectorAll(c, "h2"));
   for (const [i, heading] of csHeadings.entries()) cats[i].cs = textOf(heading);
 
-  const csAnchors = csCells.flatMap((c) => [...c.querySelectorAll("a")]);
+  const csAnchors = csCells.flatMap((c) => querySelectorAll(c, "a"));
   const countriesById = new Map(cats.flatMap(({ countries }) => countries).map((c) => [c.id, c]));
   csAnchors
-    .map((a) => ({ cs: textOf(a), id: Number(a.href.match(COUNTRY_URL_FRAGMENT_REGEX)?.[1] ?? -1) }))
+    .map((a) => ({ cs: textOf(a), id: Number(hrefOf(a)?.match(COUNTRY_URL_FRAGMENT_REGEX)?.[1] ?? -1) }))
     .filter(({ id }) => id !== -1)
     .map(({ cs, id }) => ({ cs, country: countriesById.get(id) }))
     .forEach(({ country, cs }) => {
@@ -128,12 +143,12 @@ export async function getBaseCategories(cache?: Cache): Promise<Categories> {
   }));
 
   // extract fields
-  const enAnchors = enCells.flatMap((c) => [...c.querySelectorAll("a")]);
+  const enAnchors = enCells.flatMap((c) => querySelectorAll(c, "a"));
   const enFields = new Map(
-    enAnchors.map((a) => [Number(a.href.match(FIELD_URL_FRAGMENT_REGEX)?.[1] ?? -1), textOf(a)])
+    enAnchors.map((a) => [Number(hrefOf(a).match(FIELD_URL_FRAGMENT_REGEX)?.[1] ?? -1), textOf(a)])
   );
   const csFields = new Map(
-    csAnchors.map((a) => [Number(a.href.match(FIELD_URL_FRAGMENT_REGEX)?.[1] ?? -1), textOf(a)])
+    csAnchors.map((a) => [Number(hrefOf(a).match(FIELD_URL_FRAGMENT_REGEX)?.[1] ?? -1), textOf(a)])
   );
   enFields.delete(-1);
   csFields.delete(-1);
@@ -163,10 +178,10 @@ export async function getSpecializationsOfField(fieldId: number, cache?: Cache):
   const [enItems, csItems] = [enDoc, csDoc].map(
     (doc) =>
       new Map(
-        [...doc.querySelectorAll<HTMLAnchorElement>(`a[href*="&faculty=${fieldId}"]`)]
+        querySelectorAll(doc, `a[href*="&faculty=${fieldId}"]`)
           .map((a) => ({
             name: textOf(a),
-            id: Number(a.href.match(SPECIALIZATION_URL_FRAGMENT_REGEX)?.[1] ?? -1),
+            id: Number(hrefOf(a).match(SPECIALIZATION_URL_FRAGMENT_REGEX)?.[1] ?? -1),
           }))
           .filter(({ id }) => id !== -1)
           .map(({ id, name }) => [id, name])
@@ -207,12 +222,12 @@ async function sublistToReviewEntries(url: string, cache?: Cache): Promise<Revie
   const enDoc = await urlToDocument(url + LANG_URL_FRAGMENT + LANG_ENGLISH, cache);
   const csDoc = await urlToDocument(url + LANG_URL_FRAGMENT + LANG_CZECH, cache);
 
-  const [enRows, csRows] = [enDoc, csDoc].map((doc) => [
-    ...(doc.querySelector(".content .tablist table tbody")?.querySelectorAll("tr") ?? []),
-  ]);
+  const [enRows, csRows] = [enDoc, csDoc].map((doc) =>
+    querySelectorAll(querySelector(doc, ".content .tablist table tbody"), "tr")
+  );
 
   csRows.shift();
-  const headers = [...(enRows.shift()?.querySelectorAll("td, th") ?? [])].map((th) => textOf(th).toLowerCase());
+  const headers = querySelectorAll(enRows.shift(), "td, th").map((th) => textOf(th).toLowerCase());
 
   const findColumn = (str: string) => headers.findIndex((h) => h.includes(str)) + 1;
   const cols = {
@@ -224,9 +239,9 @@ async function sublistToReviewEntries(url: string, cache?: Cache): Promise<Revie
   };
 
   const getColumn = (tr: Element, i: number) => tr.querySelector(`td:nth-of-type(${i})`);
-  return enRows.map((row, i): ReviewEntry => {
-    const a = getColumn(row, cols.location)?.querySelector("a");
-    const id = Number(a?.href.match(REVIEW_ID_URL_FRAGMENT_REGEX)?.[1] ?? -1);
+  return enRows.map((row): ReviewEntry => {
+    const a = querySelector(getColumn(row, cols.location), "a");
+    const id = Number(hrefOf(a).match(REVIEW_ID_URL_FRAGMENT_REGEX)?.[1] ?? -1);
 
     const year = Number(textOf(getColumn(row, cols.year)));
     const location = textOf(getColumn(row, cols.location));
@@ -235,11 +250,11 @@ async function sublistToReviewEntries(url: string, cache?: Cache): Promise<Revie
       .map((s) => s.trim());
     const [surname, name] = student;
 
-    const reviewLanguage = row.querySelector(`img[src*="${REVIEW_IN_CZECH_ICON}"]`) === null ? "en" : "cs";
+    const reviewLanguage = querySelector(row, `img[src*="${REVIEW_IN_CZECH_ICON}"]`) === undefined ? "en" : "cs";
     const universityEn = textOf(getColumn(row, cols.university));
     const universityCs =
       mapOpt(
-        csRows.find((row) => [...row.querySelectorAll("a")].some((a) => a.href.match(REVIEW_ID_URL_FRAGMENT + id))),
+        csRows.find((row) => querySelectorAll(row, "a").some((a) => hrefOf(a).match(REVIEW_ID_URL_FRAGMENT + id))),
         (row) => textOf(getColumn(row, cols.university))
       ) ?? "";
     const university =
@@ -250,7 +265,7 @@ async function sublistToReviewEntries(url: string, cache?: Cache): Promise<Revie
             cs: universityCs,
           };
 
-    const thumbnailUrl = mapOpt(row.querySelector<HTMLImageElement>("img.thumb_img")?.src, (src) => ROOT_URL + src);
+    const thumbnailUrl = mapOpt(srcOf(querySelector(row, "img.thumb_img")), (src) => ROOT_URL + src);
 
     return {
       id,
@@ -320,27 +335,27 @@ export interface ReviewContent {
 }
 export async function getReviewContent(id: number, cache?: Cache): Promise<ReviewContent> {
   const doc = await urlToDocument(REVIEW_URL + id, cache);
-  const report = doc.querySelector(".student_report")!;
+  const report = querySelector(doc, ".student_report")!;
 
   // This here gets the year of study from the report title
-  const yearOfStudy = textOf(report.querySelector("h4")).match(/year (.*)$/i)?.[1] ?? "";
+  const yearOfStudy = textOf(querySelector(report, "h4")).match(/year (.*)$/i)?.[1] ?? "";
 
-  const photoLinks = [...(report.querySelector(".gallery")?.querySelectorAll("a") ?? [])];
+  const photoLinks = querySelectorAll(querySelector(report, ".gallery"), "a");
   const photos = photoLinks.map(
     (a): Photo => ({
-      fullSizeUrl: ROOT_URL + a.href,
-      thumbnailUrl: mapOpt(a.querySelector("img")?.src, (s) => ROOT_URL + s) ?? "",
+      fullSizeUrl: ROOT_URL + hrefOf(a),
+      thumbnailUrl: mapOpt(srcOf(querySelector(a, "img")), (s) => ROOT_URL + s) ?? "",
     })
   );
 
-  const infoTable = report.querySelector("table.header");
-  const infoRows = [...(infoTable?.querySelectorAll("tr") ?? [])];
-  const infoCells = infoRows.map((row) => [...row.querySelectorAll("td")].map(textOf) as [string, string]);
+  const infoTable = querySelector(report, "table.header");
+  const infoRows = querySelectorAll(infoTable, "tr");
+  const infoCells = infoRows.map((row) => querySelectorAll(row, "td").map(textOf) as [string, string]);
   const info = infoCells.map((innerArray) => innerArray[1].trim());
 
   // it seems all the actual text is in elements with the body class
-  const reportBodies = report.querySelector("#report_body")?.querySelectorAll(".body");
-  const bodiesTexts = [...(reportBodies ?? [])].map((body) => textOf(body));
+  const reportBodies = querySelectorAll(querySelector(report, "#report_body"), ".body");
+  const bodiesTexts = reportBodies.map((body) => textOf(body));
 
   return {
     id,
@@ -420,7 +435,7 @@ export async function getDataDump(): Promise<AllReviewData> {
   const specializations: Specialization[] = [];
 
   // Fetch fields and specializations, make lookup tables for them
-  let reviewIdToFieldId = new Map<number, number>();
+  const reviewIdToFieldId = new Map<number, number>();
 
   await PromisePool.withConcurrency(MAX_CONCURRENT_REQUESTS)
     .for(fields)
@@ -435,7 +450,7 @@ export async function getDataDump(): Promise<AllReviewData> {
       }
     });
 
-  let specializationNameToId = new Map<string, number>();
+  const specializationNameToId = new Map<string, number>();
   for (const { id, name } of specializations) {
     specializationNameToId.set(name.en, id);
     specializationNameToId.set(name.cs, id);
